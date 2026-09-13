@@ -71,6 +71,18 @@ class SnaptradeAccount::ActivitiesProcessor
 
   SNAPTRADE_TYPE_TO_LABEL = ACTIVITY_RULES.transform_values { |r| r[:label] }.freeze
 
+  # Narratives from banks/brokers reliably encode direction ("DEBIT" = money
+  # out, "CREDIT" = money in), while SnapTrade's type mapping and amount sign
+  # are NOT consistent across institutions for every subtype:
+  #   - IBKR reports margin interest paid as type INTEREST (e.g. "USD DEBIT INT
+  #     FOR JUN-2026"), which the type map below forces to money-in (income).
+  #   - Citi inbound "ACH ELECTRONIC CREDIT" arrives with a sign/type combo
+  #     that the TRANSFER inversion flips to money-out (expense).
+  # Trust the narrative's DEBIT/CREDIT keyword first; fall back to the
+  # type-based normalization when the narrative carries no direction.
+  NARRATIVE_MONEY_OUT = /\bDEBIT\b/i
+  NARRATIVE_MONEY_IN = /\bCREDIT\b/i
+
   def initialize(snaptrade_account)
     @snaptrade_account = snaptrade_account
   end
@@ -335,8 +347,9 @@ class SnaptradeAccount::ActivitiesProcessor
       symbol = symbol_data[:symbol] || symbol_data["symbol"] || symbol_data[:ticker]
       description = data[:description] || data["description"] || build_description(activity_type, symbol)
 
-      # Normalize amount sign for certain activity types
-      amount = normalize_cash_amount(amount, activity_type)
+      # Normalize amount sign - an explicit DEBIT/CREDIT keyword in the
+      # provider narrative wins over the type-based fallback
+      amount = normalize_cash_amount(amount, activity_type, description)
 
       # Extract currency - handle both nested object and string
       currency_data = data[:currency] || data["currency"]
@@ -383,7 +396,12 @@ class SnaptradeAccount::ActivitiesProcessor
       true
     end
 
-    def normalize_cash_amount(amount, activity_type)
+    def normalize_cash_amount(amount, activity_type, description = nil)
+      if description.present?
+        return amount.abs if description.match?(NARRATIVE_MONEY_OUT)
+        return -amount.abs if description.match?(NARRATIVE_MONEY_IN)
+      end
+
       rule = ACTIVITY_RULES[activity_type] || {}
 
       case rule[:cash_flow]
