@@ -266,7 +266,12 @@ class SnaptradeAccount::ActivitiesProcessor
       case activity_type
       when "WITHDRAWAL", "TRANSFER_OUT", "FEE", "TAX"
         amount.abs   # Money out should be positive in Sure
-      when "CONTRIBUTION", "TRANSFER_IN", "DIVIDEND", "DIV", "INTEREST", "CASH"
+      when "CONTRIBUTION", "TRANSFER_IN", "DIVIDEND", "DIV", "INTEREST", "CASH", "DIVIDEND_AND_INTEREST"
+        # DIVIDEND_AND_INTEREST: SnapTrade reports bank interest/dividend credits
+        # (e.g. Citi "Interest Payment", "Interest Adj ... Checking Reward") under
+        # this type. It is not in the historical type map, so it fell through to
+        # the passthrough branch which kept SnapTrade's account-perspective sign
+        # (positive = money in) — storing received interest as an EXPENSE.
         -amount.abs  # Money in should be negative in Sure
       when "TRANSFER"
         # Direction is not encoded in the type (unlike TRANSFER_IN/TRANSFER_OUT), so the

@@ -259,6 +259,50 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
     assert_equal "income", entry.classification
   end
 
+  test "processes bank interest credit with DIVIDEND_AND_INTEREST type as income" do
+    # Regression test: Citi "Interest Payment" arrives as DIVIDEND_AND_INTEREST
+    # with a positive (account-perspective) amount. Before the type was added to
+    # the money-in branch it hit the passthrough and stored as an expense.
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "int_payment_001",
+        type: "DIVIDEND_AND_INTEREST",
+        amount: 86.79,
+        settlement_date: Date.current.to_s,
+        description: "Interest Payment"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "int_payment_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal(-86.79, entry.amount.to_f, "bank interest received is money in and must be stored negative")
+    assert_equal "income", entry.classification
+  end
+
+  test "processes bank interest adjustment / reward with DIVIDEND_AND_INTEREST type as income" do
+    # Regression test: Citi "Interest Adj and Q1 26 INBTA Checking Reward".
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "int_adj_001",
+        type: "DIVIDEND_AND_INTEREST",
+        amount: 750.00,
+        settlement_date: Date.current.to_s,
+        description: "Interest Adj and Q1 26 INBTA Checking Reward"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "int_adj_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal(-750.00, entry.amount.to_f, "interest adjustment/reward is money in and must be stored negative")
+    assert_equal "income", entry.classification
+  end
+
   test "processes outbound ACH debit narrative as expense" do
     @snaptrade_account.update!(raw_activities_payload: [
       build_cash_activity(
