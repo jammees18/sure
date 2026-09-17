@@ -595,6 +595,8 @@ class Provider::YahooFinance < Provider
     # Appends the Yahoo Finance symbol suffix for exchanges that require one
     # (e.g. XNSE → ".NS", XBOM → ".BO").  Already-suffixed symbols pass through.
     def normalize_symbol(symbol, exchange_operating_mic)
+      symbol = symbol.sub(/\.XDFM\z/i, ".AE")
+      symbol = symbol.sub(/\A(\d{1,3})\.HK\z/i) { "#{Regexp.last_match(1).rjust(4, '0')}.HK" }
       suffix = EXCHANGE_CONFIG.dig(exchange_operating_mic, :yahoo_suffix)
       return symbol if suffix.nil? || symbol.end_with?(suffix)
       "#{symbol}#{suffix}"

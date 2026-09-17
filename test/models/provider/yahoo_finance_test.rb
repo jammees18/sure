@@ -827,6 +827,27 @@ class Provider::YahooFinanceTest < ActiveSupport::TestCase
   #   normalize_symbol Tests
   # ================================
 
+  test "normalize_symbol translates broker tickers without changing valid Yahoo symbols" do
+    {
+      "EMAAR.XDFM" => "EMAAR.AE",
+      "emaar.xdfm" => "emaar.AE",
+      "823.HK" => "0823.HK",
+      "823.hk" => "0823.HK",
+      "0823.HK" => "0823.HK",
+      "1211.HK" => "1211.HK",
+      "3690.HK" => "3690.HK",
+      "9618.HK" => "9618.HK",
+      "EMAAR.AE" => "EMAAR.AE",
+      "AAPL" => "AAPL",
+      "BRK.B" => "BRK.B"
+    }.each do |symbol, expected|
+      assert_equal expected, @provider.send(:normalize_symbol, symbol, nil), symbol
+      assert_equal expected, @provider.send(:normalize_symbol, expected, nil), "idempotent #{symbol}"
+    end
+    assert_equal "EMAAR.AE", @provider.send(:normalize_symbol, "EMAAR.XDFM", "XDFM")
+    assert_equal "0823.HK", @provider.send(:normalize_symbol, "823.HK", "XHKG")
+  end
+
   test "normalize_symbol appends configured suffix for known MICs" do
     assert_equal "RELIANCE.NS", @provider.send(:normalize_symbol, "RELIANCE", "XNSE")
     assert_equal "INFY.NS",     @provider.send(:normalize_symbol, "INFY", "XNSE")
