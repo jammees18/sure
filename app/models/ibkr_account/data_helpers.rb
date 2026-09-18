@@ -64,6 +64,10 @@ module IbkrAccount::DataHelpers
     # since Sure has no security merge. When this account already syncs a security
     # whose ticker normalizes to the same key, reuse that spelling instead.
     # No match, or more than one candidate → nil, i.e. today's behaviour.
+    #
+    # Ticker-level on purpose: upstream's MIC canonicalization (PR #3141) matches
+    # cases of the same MIC and cannot see that "EMAAR.XDFM" and "EMAAR" are one
+    # instrument, and this branch's base (v0.7.3) predates it.
     def security_from_provider_sibling(ticker)
       sibling = unique_ticker_match(ticker, provider_holding_tickers)
       sibling && Security.find_by(ticker: sibling)
