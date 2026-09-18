@@ -278,4 +278,50 @@ class IbkrAccountProcessorTest < ActiveSupport::TestCase
     assert_not_nil trade
     assert_equal Date.current, trade.date
   end
+
+  test "processor reuses this account's provider security when IBKR spells a ticker differently" do
+    # The positions feed reports the exchange-suffixed spelling, the activities feed
+    # the bare one. Before the fix the bare symbol missed the exact match and created
+    # a second Security, splitting the holding from its trades.
+    suffixed = Security.create!(ticker: "EMAAR.XDFM", name: "EMAAR PROPERTIES PJSC")
+
+    @account.holdings.create!(
+      security: suffixed,
+      date: Date.current,
+      qty: BigDecimal("12610"),
+      price: BigDecimal("2.00"),
+      amount: BigDecimal("25220.00"),
+      currency: "AED",
+      external_id: "ibkr_#{@ibkr_account.ibkr_account_id}_665212_#{Date.current}_AED",
+      account_provider_id: @ibkr_account.account_provider&.id
+    )
+
+    @ibkr_account.update!(
+      raw_activities_payload: {
+        trades: [
+          {
+            "asset_category" => "STK",
+            "trade_id" => "9001",
+            "transaction_id" => "9001a",
+            "conid" => "665212",
+            "symbol" => "EMAAR",
+            "quantity" => "100",
+            "trade_price" => "2.00",
+            "currency" => "AED",
+            "fx_rate_to_base" => "1",
+            "buy_sell" => "BUY",
+            "trade_date" => Date.current.to_s
+          }
+        ],
+        cash_transactions: []
+      }
+    )
+
+    IbkrAccount::Processor.new(@ibkr_account).process
+
+    assert_nil Security.find_by(ticker: "EMAAR"), "expected no duplicate bare-ticker Security"
+    trade = @account.entries.find_by(external_id: "ibkr_trade_9001")
+    assert_not_nil trade
+    assert_equal suffixed.id, trade.entryable.security_id
+  end
 end
