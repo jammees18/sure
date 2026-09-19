@@ -53,9 +53,29 @@ module IbkrAccount::DataHelpers
       ticker = data[:symbol].to_s.strip.upcase
       return nil if ticker.blank?
 
-      Security.find_by(ticker: ticker) || security_from_provider_sibling(ticker) || create_security_from_row(ticker)
+      ticker = canonical_ticker(ticker, data[:listing_exchange])
+
+      Security.find_by(ticker: ticker) || security_from_provider_sibling(ticker) || create_security_from_row(ticker, data)
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
       Security.find_by(ticker: ticker)
+    end
+
+    # IBKR Flex spells exchange-listed symbols bare ("EMAAR", "1211") while Sure
+    # stores the exchange-suffixed spelling ("EMAAR.XDFM", "1211.HK"). Creating a
+    # bare row duplicates the existing security and goes unpriced by Yahoo, so
+    # canonicalize before any lookup. No zero-padding on SEHK: existing rows are
+    # spelled "823.HK", not "0823.HK".
+    # ponytail: the DFM listing_exchange value set is defensive — the exact Flex
+    # value is unconfirmed; verify and edit this one line if IBKR reports another.
+    def canonical_ticker(ticker, listing_exchange)
+      case listing_exchange.to_s.strip.upcase
+      when "SEHK"
+        ticker.end_with?(".HK") ? ticker : "#{ticker}.HK"
+      when "DFM", "XDFM", "NASDUBAI", "DUBAI"
+        ticker.end_with?(".XDFM") ? ticker : "#{ticker}.XDFM"
+      else
+        ticker
+      end
     end
 
     # Two IBKR feeds can spell one instrument differently (positions "EMAAR.XDFM",
@@ -119,7 +139,7 @@ module IbkrAccount::DataHelpers
       value.present? ? value.to_s.upcase : fallback
     end
 
-    def create_security_from_row(ticker)
-      Security.create!(ticker: ticker, name: ticker)
+    def create_security_from_row(ticker, data)
+      Security.create!(ticker: ticker, name: data[:description].presence || ticker)
     end
 end
