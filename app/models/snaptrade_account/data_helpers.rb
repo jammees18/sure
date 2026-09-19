@@ -71,6 +71,15 @@ module SnaptradeAccount::DataHelpers
 
       return security if security
 
+      # Two SnapTrade payloads can spell one instrument differently (holdings
+      # "EMAAR.XDFM", activities "EMAAR"). The exact match misses, so we used to
+      # create a second Security and split the holding and its trades across two
+      # rows — permanent, since Sure has no security merge. When this account
+      # already syncs a security whose ticker normalizes to the same key, reuse
+      # that spelling instead. No match, or more than one candidate → create.
+      sibling = security_from_provider_sibling(ticker)
+      return sibling if sibling
+
       # Create new security
       security_name = extract_security_name(symbol_data, ticker)
 
@@ -86,6 +95,42 @@ module SnaptradeAccount::DataHelpers
       # Handle race condition - another process may have created it
       Rails.logger.error "Failed to create security #{ticker}: #{e.message}"
       Security.find_by(ticker: ticker) # Retry find in case of race condition
+    end
+
+    # When this account already syncs a security whose ticker normalizes to the
+    # same key, reuse that spelling instead of creating a duplicate row.
+    def security_from_provider_sibling(ticker)
+      sibling = unique_ticker_match(ticker, provider_holding_tickers)
+      sibling && Security.find_by(ticker: sibling)
+    end
+
+    # Tickers this account already holds via a provider sync. Manual holdings carry
+    # no external_id/account_provider_id, so they are excluded on purpose: only a
+    # provider spelling is authoritative for a provider feed. Includers supply #account.
+    def provider_holding_tickers
+      return [] unless account
+
+      Holding.where(account_id: account.id)
+        .where("holdings.external_id IS NOT NULL OR holdings.account_provider_id IS NOT NULL")
+        .joins(:security)
+        .distinct
+        .pluck("securities.ticker")
+    end
+
+    # Returns the one candidate ticker sharing +ticker+'s normalized key, else nil.
+    def unique_ticker_match(ticker, candidates)
+      key = ticker_key(ticker)
+      matches = candidates.select { |candidate| ticker_key(candidate) == key }
+      matches.one? ? matches.first : nil
+    end
+
+    # Strips an exchange suffix ("EMAAR.XDFM" → "EMAAR") and HK-style zero padding
+    # ("0823.HK" → "823"). Blunt on purpose: callers only consult it when the exact
+    # ticker is missing and require a single provider-backed sibling, so an over-eager
+    # collapse cannot invent a row — it can only reuse one this account already syncs.
+    def ticker_key(ticker)
+      base = ticker.to_s.strip.upcase.sub(/\.[A-Z0-9]{1,4}\z/, "")
+      base.sub(/\A0+(?=\d)/, "")
     end
 
     def extract_security_name(symbol_data, fallback_ticker)
