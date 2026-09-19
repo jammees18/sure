@@ -106,9 +106,10 @@ module SnaptradeAccount::DataHelpers
 
     # Tickers this account already holds via a provider sync. Manual holdings carry
     # no external_id/account_provider_id, so they are excluded on purpose: only a
-    # provider spelling is authoritative for a provider feed. Includers supply #account.
+    # provider spelling is authoritative for a provider feed. Includers supply #account;
+    # bare includers (e.g. helper-only tests) get no candidates.
     def provider_holding_tickers
-      return [] unless account
+      return [] unless respond_to?(:account, true) && account
 
       Holding.where(account_id: account.id)
         .where("holdings.external_id IS NOT NULL OR holdings.account_provider_id IS NOT NULL")
