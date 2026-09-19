@@ -69,7 +69,7 @@ class IbkrAccount::DataHelpersResolveSecurityTest < ActiveSupport::TestCase
       @account = account
     end
 
-    public :resolve_security, :security_from_provider_sibling, :unique_ticker_match, :ticker_key
+    public :resolve_security, :security_from_provider_sibling, :unique_ticker_match, :ticker_key, :canonical_ticker
 
     private
 
@@ -155,5 +155,90 @@ class IbkrAccount::DataHelpersResolveSecurityTest < ActiveSupport::TestCase
     end
 
     assert_equal 1, created.size
+  end
+end
+
+# canonical_ticker runs before the exact lookup, so a bare Flex symbol must
+# exact-match the exchange-suffixed row Sure already stores.
+class IbkrAccount::DataHelpersCanonicalTickerTest < ActiveSupport::TestCase
+  class CanonicalHelper
+    include IbkrAccount::DataHelpers
+
+    public :resolve_security, :canonical_ticker
+
+    private
+
+      def provider_holding_tickers
+        []
+      end
+  end
+
+  setup do
+    @helper = CanonicalHelper.new
+  end
+
+  test "canonical_ticker appends .HK for SEHK listings" do
+    assert_equal "1211.HK", @helper.canonical_ticker("1211", "SEHK")
+  end
+
+  test "canonical_ticker keeps an already-suffixed HK ticker" do
+    assert_equal "1211.HK", @helper.canonical_ticker("1211.HK", "SEHK")
+  end
+
+  test "canonical_ticker appends .XDFM for Dubai exchange variants" do
+    %w[DFM XDFM NASDUBAI DUBAI].each do |exchange|
+      assert_equal "EMAAR.XDFM", @helper.canonical_ticker("EMAAR", exchange), "exchange=#{exchange}"
+    end
+  end
+
+  test "canonical_ticker keeps an already-suffixed XDFM ticker" do
+    assert_equal "EMAAR.XDFM", @helper.canonical_ticker("EMAAR.XDFM", "XDFM")
+  end
+
+  test "canonical_ticker leaves the ticker alone for nil or unknown exchanges" do
+    assert_equal "EMAAR", @helper.canonical_ticker("EMAAR", nil)
+    assert_equal "EMAAR", @helper.canonical_ticker("EMAAR", "NASDAQ")
+    assert_equal "1211", @helper.canonical_ticker("1211", "")
+  end
+
+  test "resolve_security canonicalizes before the exact lookup so the existing suffixed row wins" do
+    looked_up = []
+    existing = Security.new(ticker: "1211.HK")
+
+    find_by = ->(*args, **kwargs) do
+      ticker = kwargs[:ticker] || args.first[:ticker]
+      looked_up << ticker
+      ticker == "1211.HK" ? existing : nil
+    end
+
+    Security.stub(:find_by, find_by) do
+      assert_same existing, @helper.resolve_security({ "symbol" => "1211", "listing_exchange" => "SEHK" })
+    end
+
+    assert_equal [ "1211.HK" ], looked_up
+  end
+
+  test "create_security_from_row names the security from the row description" do
+    created = []
+
+    Security.stub(:find_by, nil) do
+      Security.stub(:create!, ->(*args, **kwargs) { attrs = kwargs.presence || args.first; created << attrs; attrs }) do
+        @helper.resolve_security({ "symbol" => "EMAAR", "listing_exchange" => "XDFM", "description" => "EMAAR PROPERTIES PJSC" })
+      end
+    end
+
+    assert_equal [ { ticker: "EMAAR.XDFM", name: "EMAAR PROPERTIES PJSC" } ], created
+  end
+
+  test "create_security_from_row falls back to the ticker when the description is missing" do
+    created = []
+
+    Security.stub(:find_by, nil) do
+      Security.stub(:create!, ->(*args, **kwargs) { attrs = kwargs.presence || args.first; created << attrs; attrs }) do
+        @helper.resolve_security({ "symbol" => "EMAAR" })
+      end
+    end
+
+    assert_equal [ { ticker: "EMAAR", name: "EMAAR" } ], created
   end
 end
