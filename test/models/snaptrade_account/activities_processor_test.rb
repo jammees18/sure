@@ -412,6 +412,42 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
     assert_equal 0, Entry.where(external_id: "trade_orphan").count
   end
 
+  test "processor reuses this account's provider security when SnapTrade spells a ticker differently" do
+    # The holdings feed reports the exchange-suffixed spelling, the activities feed
+    # the bare one. Before the fix the bare symbol missed the exact match and created
+    # a second Security, splitting the holding from its trades.
+    suffixed = Security.create!(ticker: "EMAAR.XDFM", name: "Emaar Properties PJSC")
+
+    @account.holdings.create!(
+      security: suffixed,
+      date: Date.current,
+      qty: BigDecimal("12610"),
+      price: BigDecimal("2.00"),
+      amount: BigDecimal("25220.00"),
+      currency: "AED",
+      external_id: "snaptrade_holding_emaar",
+      account_provider_id: @snaptrade_account.account_provider&.id
+    )
+
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_trade_activity(
+        id: "trade_emaar_001",
+        type: "BUY",
+        symbol: "EMAAR",
+        units: 100,
+        price: 2.00,
+        settlement_date: Date.current.to_s
+      )
+    ])
+
+    SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account).process
+
+    assert_nil Security.find_by(ticker: "EMAAR"), "expected no duplicate bare-ticker Security"
+    entry = @account.entries.find_by(external_id: "trade_emaar_001")
+    assert_not_nil entry
+    assert_equal suffixed.id, entry.entryable.security_id
+  end
+
   private
 
     def build_trade_activity(id:, type:, symbol:, units:, price:, settlement_date:)
