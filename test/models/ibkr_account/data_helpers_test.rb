@@ -6,7 +6,7 @@ class IbkrAccount::DataHelpersTest < ActiveSupport::TestCase
   class TestHelper
     include IbkrAccount::DataHelpers
 
-    public :parse_decimal
+    public :parse_decimal, :normalized_quantity
   end
 
   setup do
@@ -53,6 +53,16 @@ class IbkrAccount::DataHelpersTest < ActiveSupport::TestCase
   test "parse_decimal returns nil for non-numeric string" do
     assert_nil @helper.parse_decimal("N/A")
     assert_nil @helper.parse_decimal("not_a_number")
+  end
+
+  test "normalized_quantity converts BOND face value to per-100 units" do
+    row = { asset_category: "BOND" }
+    assert_equal BigDecimal("120"), @helper.normalized_quantity(row, BigDecimal("12000"))
+  end
+
+  test "normalized_quantity leaves non-BOND quantities unchanged" do
+    row = { asset_category: "STK" }
+    assert_equal BigDecimal("12000"), @helper.normalized_quantity(row, BigDecimal("12000"))
   end
 end
 
