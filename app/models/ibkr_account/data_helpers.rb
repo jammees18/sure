@@ -139,6 +139,14 @@ module IbkrAccount::DataHelpers
       value.present? ? value.to_s.upcase : fallback
     end
 
+    # IBKR Flex reports bond quantities as face value (position/trade quantity
+    # 12000) while prices stay percent-of-par (markPrice/tradePrice 96.722).
+    # Store quantity as face/100 so amount = qty × price and the per-unit cost
+    # basis stays percent-of-par (valid_lots weights by the converted qty).
+    def normalized_quantity(row, quantity)
+      row[:asset_category].to_s == "BOND" ? quantity / 100 : quantity
+    end
+
     def create_security_from_row(ticker, data)
       Security.create!(ticker: ticker, name: data[:description].presence || ticker)
     end
