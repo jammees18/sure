@@ -183,7 +183,13 @@ jobs:
           bin/rails db:seed
 
       - name: System tests
-        run: DISABLE_PARALLELIZATION=true bin/rails test:system
+        # The ubuntu-24.04 runner image ships a stale chromedriver in PATH that
+        # predates the installed google-chrome-stable; Selenium prefers the PATH
+        # driver and fails with SessionNotCreatedError. Remove it so
+        # selenium-manager downloads the matching driver.
+        run: |
+          sudo rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver
+          DISABLE_PARALLELIZATION=true bin/rails test:system
 
       - name: Keep screenshots from failed system tests
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
