@@ -129,12 +129,14 @@ class IbkrItem::ReportParser
       parse_decimal(row&.fetch("ending_cash", nil)) || BigDecimal("0")
     end
 
+    # ChangeInPositionValue emits one row per asset category when the account
+    # holds multiple categories (e.g. a BASE_SUMMARY row for stocks AND one for
+    # bonds). Summing all BASE_SUMMARY rows keeps the balance complete; picking
+    # just the first silently drops every category after the first.
     def extract_current_balance(position_values, account_currency)
-      base_summary = position_values.find { |row| row["currency"] == "BASE_SUMMARY" }
-      account_row = position_values.find { |row| row["currency"] == account_currency }
-      row = base_summary || account_row
-
-      parse_decimal(row&.fetch("end_of_period_value", nil)) || BigDecimal("0")
+      base_rows = position_values.select { |row| row["currency"] == "BASE_SUMMARY" }
+      rows = base_rows.presence || position_values.select { |row| row["currency"] == account_currency }
+      rows.sum { |row| parse_decimal(row["end_of_period_value"]) || BigDecimal("0") }
     end
 
     def extract_total_balance(position_values, cash_rows, account_currency)
