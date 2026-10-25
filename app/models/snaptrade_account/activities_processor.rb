@@ -50,6 +50,12 @@ class SnaptradeAccount::ActivitiesProcessor
     # Cash activities
     "DIVIDEND" => { category: :cash, label: "Dividend", cash_flow: :inflow },
     "DIV" => { category: :cash, label: "Dividend", cash_flow: :inflow },
+    # DIVIDEND_AND_INTEREST: SnapTrade reports bank interest/dividend credits
+    # (e.g. Citi "Interest Payment", "Interest Adj ... Checking Reward") under
+    # this type. Without a rule it fell through to the passthrough, keeping
+    # SnapTrade's account-perspective sign (positive = money in) — storing
+    # received interest as an EXPENSE. Refs we-promise/sure#3547.
+    "DIVIDEND_AND_INTEREST" => { category: :cash, label: "Dividend", cash_flow: :inflow },
     "CONTRIBUTION" => { category: :cash, label: "Contribution", cash_flow: :inflow },
     "WITHDRAWAL" => { category: :cash, label: "Withdrawal", cash_flow: :outflow },
     "TRANSFER" => { category: :cash, label: "Transfer", cash_flow: :invert },
