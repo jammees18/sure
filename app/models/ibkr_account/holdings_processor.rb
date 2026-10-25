@@ -79,16 +79,18 @@ class IbkrAccount::HoldingsProcessor
       total_cost = BigDecimal("0")
 
       rows.each do |row|
-        row_quantity   = parse_decimal(row[:position])
+        raw_quantity   = parse_decimal(row[:position])
         row_cost_basis = parse_decimal(row[:cost_basis_price])
 
-        unless row_quantity && row_cost_basis
+        unless raw_quantity && row_cost_basis
           Rails.logger.warn(
             "IbkrAccount::HoldingsProcessor - Skipping lot with missing position or cost_basis_price " \
             "for conid=#{row[:conid].inspect}"
           )
           next
         end
+
+        row_quantity = normalized_quantity(row, raw_quantity)
 
         total_quantity += row_quantity.abs
         total_cost     += row_quantity.abs * row_cost_basis
@@ -100,7 +102,9 @@ class IbkrAccount::HoldingsProcessor
     end
 
     def supported_position?(row)
-      row[:asset_category].to_s == "STK" &&
+      # BOND rows carry the same Flex fields as STK; quantity is face value and
+      # converted in valid_lots (see DataHelpers#normalized_quantity).
+      %w[STK BOND].include?(row[:asset_category].to_s) &&
         row[:side].to_s == "Long" &&
         row[:conid].present? &&
         row[:security_id].present? &&

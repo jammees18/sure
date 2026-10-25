@@ -337,6 +337,164 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
     assert_equal "Transfer", entry.entryable.investment_activity_label
   end
 
+  test "processes debit interest narrative as expense despite INTEREST type" do
+    # Regression test: IBKR reports margin interest PAID as type INTEREST with a
+    # "DEBIT INT" narrative. The type map forces INTEREST to money-in, so the
+    # narrative keyword must win.
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "int_debit_001",
+        type: "INTEREST",
+        amount: 6.08,
+        settlement_date: Date.current.to_s,
+        description: "USD DEBIT INT FOR JUN-2026"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "int_debit_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal 6.08, entry.amount.to_f, "debit interest is money out and must be stored positive"
+    assert_equal "expense", entry.classification
+    assert_equal "Interest", entry.entryable.investment_activity_label
+  end
+
+  test "processes credit interest narrative as income" do
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "int_credit_001",
+        type: "INTEREST",
+        amount: 0.69,
+        settlement_date: Date.current.to_s,
+        description: "USD CREDIT INT FOR JUN-2026"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "int_credit_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal(-0.69, entry.amount.to_f, "credit interest is money in and must be stored negative")
+    assert_equal "income", entry.classification
+  end
+
+  test "processes bank interest credit with DIVIDEND_AND_INTEREST type as income" do
+    # Regression test: Citi "Interest Payment" arrives as DIVIDEND_AND_INTEREST
+    # with a positive (account-perspective) amount. Before the type was added to
+    # the money-in branch it hit the passthrough and stored as an expense.
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "int_payment_001",
+        type: "DIVIDEND_AND_INTEREST",
+        amount: 86.79,
+        settlement_date: Date.current.to_s,
+        description: "Interest Payment"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "int_payment_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal(-86.79, entry.amount.to_f, "bank interest received is money in and must be stored negative")
+    assert_equal "income", entry.classification
+  end
+
+  test "processes bank interest adjustment / reward with DIVIDEND_AND_INTEREST type as income" do
+    # Regression test: Citi "Interest Adj and Q1 26 INBTA Checking Reward".
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "int_adj_001",
+        type: "DIVIDEND_AND_INTEREST",
+        amount: 750.00,
+        settlement_date: Date.current.to_s,
+        description: "Interest Adj and Q1 26 INBTA Checking Reward"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "int_adj_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal(-750.00, entry.amount.to_f, "interest adjustment/reward is money in and must be stored negative")
+    assert_equal "income", entry.classification
+  end
+
+  test "processes inbound ACH credit narrative as income even when provider sign disagrees" do
+    # Regression test: Citi inbound "ACH ELECTRONIC CREDIT" was observed syncing
+    # as an expense. The narrative keyword must win over both the type map and
+    # the provider-supplied sign.
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "ach_credit_001",
+        type: "TRANSFER",
+        amount: -250.00,
+        settlement_date: Date.current.to_s,
+        description: "ACH ELECTRONIC CREDIT and INTERACTIVE BROK ACH TRANSF"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "ach_credit_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal(-250.00, entry.amount.to_f, "inbound ACH credit is money in and must be stored negative")
+    assert_equal "income", entry.classification
+  end
+
+  test "processes outbound ACH debit narrative as expense" do
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_cash_activity(
+        id: "ach_debit_001",
+        type: "TRANSFER",
+        amount: 250.00,
+        settlement_date: Date.current.to_s,
+        description: "ACH ELECTRONIC DEBIT and INTERACTIVE BROK ACH TRANSF"
+      )
+    ])
+
+    processor = SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account)
+    processor.process
+
+    entry = @account.entries.find_by(external_id: "ach_debit_001", source: "snaptrade")
+    assert_not_nil entry
+    assert_equal 250.00, entry.amount.to_f, "outbound ACH debit is money out and must be stored positive"
+    assert_equal "expense", entry.classification
+  end
+
+  test "maps all known activity types correctly" do
+    type_mappings = {
+      "BUY" => "Buy",
+      "SELL" => "Sell",
+      "DIVIDEND" => "Dividend",
+      "DIV" => "Dividend",
+      "CONTRIBUTION" => "Contribution",
+      "WITHDRAWAL" => "Withdrawal",
+      "TRANSFER_IN" => "Transfer",
+      "TRANSFER_OUT" => "Transfer",
+      "INTEREST" => "Interest",
+      "FEE" => "Fee",
+      "TAX" => "Fee",
+      "REI" => "Reinvestment",
+      "REINVEST" => "Reinvestment",
+      "CASH" => "Contribution",
+      "CORP_ACTION" => "Other",
+      "SPLIT_REVERSE" => "Other"
+    }
+
+    type_mappings.each do |snaptrade_type, expected_label|
+      actual = SnaptradeAccount::ActivitiesProcessor::SNAPTRADE_TYPE_TO_LABEL[snaptrade_type]
+      assert_equal expected_label, actual, "Type #{snaptrade_type} should map to #{expected_label}"
+    end
+  end
+
+
   test "keeps cash TRANSFER with zero units on the cash transaction path" do
     process_activities(
       build_cash_activity(
@@ -1053,6 +1211,42 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
     assert_equal 0, Entry.where(external_id: "trade_orphan").count
   end
 
+  test "processor reuses this account's provider security when SnapTrade spells a ticker differently" do
+    # The holdings feed reports the exchange-suffixed spelling, the activities feed
+    # the bare one. Before the fix the bare symbol missed the exact match and created
+    # a second Security, splitting the holding from its trades.
+    suffixed = Security.create!(ticker: "EMAAR.XDFM", name: "Emaar Properties PJSC")
+
+    @account.holdings.create!(
+      security: suffixed,
+      date: Date.current,
+      qty: BigDecimal("12610"),
+      price: BigDecimal("2.00"),
+      amount: BigDecimal("25220.00"),
+      currency: "AED",
+      external_id: "snaptrade_holding_emaar",
+      account_provider_id: @snaptrade_account.account_provider&.id
+    )
+
+    @snaptrade_account.update!(raw_activities_payload: [
+      build_trade_activity(
+        id: "trade_emaar_001",
+        type: "BUY",
+        symbol: "EMAAR",
+        units: 100,
+        price: 2.00,
+        settlement_date: Date.current.to_s
+      )
+    ])
+
+    SnaptradeAccount::ActivitiesProcessor.new(@snaptrade_account).process
+
+    assert_nil Security.find_by(ticker: "EMAAR"), "expected no duplicate bare-ticker Security"
+    entry = @account.entries.find_by(external_id: "trade_emaar_001")
+    assert_not_nil entry
+    assert_equal suffixed.id, entry.entryable.security_id
+  end
+
   private
 
     def process_activities(*activities)
@@ -1087,7 +1281,7 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
       activity
     end
 
-    def build_cash_activity(id:, type:, amount:, settlement_date:, symbol: nil)
+    def build_cash_activity(id:, type:, amount:, settlement_date:, symbol: nil, description: nil)
       activity = {
         "id" => id,
         "type" => type,
@@ -1095,6 +1289,8 @@ class SnaptradeAccount::ActivitiesProcessorTest < ActiveSupport::TestCase
         "settlement_date" => settlement_date,
         "currency" => { "code" => "USD" }
       }
+
+      activity["description"] = description if description
 
       if symbol
         activity["symbol"] = {

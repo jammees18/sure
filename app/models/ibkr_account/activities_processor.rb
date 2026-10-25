@@ -43,6 +43,8 @@ class IbkrAccount::ActivitiesProcessor
       native_price = parse_decimal(row[:trade_price])
       return { imported: false, fees: 0 } if quantity.nil? || native_price.nil?
 
+      quantity = normalized_quantity(row, quantity)
+
       buy_sell = row[:buy_sell].to_s.upcase
       signed_quantity = buy_sell == "SELL" ? -quantity.abs : quantity.abs
       native_amount = buy_sell == "SELL" ? -(native_price * quantity.abs) : (native_price * quantity.abs)
@@ -148,7 +150,9 @@ class IbkrAccount::ActivitiesProcessor
     end
 
     def supported_trade?(row)
-      row[:asset_category].to_s == "STK" &&
+      # BOND trades report quantity as face value and tradePrice as percent of
+      # par; converted in process_trade (see DataHelpers#normalized_quantity).
+      %w[STK BOND].include?(row[:asset_category].to_s) &&
         row[:buy_sell].present? &&
         row[:conid].present? &&
         row[:currency].present? &&
