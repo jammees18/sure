@@ -70,9 +70,11 @@ class IbkrAccount::HoldingsProcessor
       )
 
       # Provider prices win; the broker snapshot only fills an empty slot.
+      # Date.current (not holding.date): Flex reportDate lags 1-3 days per
+      # position group, but Security#current_price only looks up Date.current.
       now = Time.current
       Security::Price.insert_all(
-        [ { security_id: holding.security_id, date: holding.date, price: holding.price,
+        [ { security_id: holding.security_id, date: Date.current, price: holding.price,
             currency: holding.currency, created_at: now, updated_at: now } ],
         unique_by: %i[security_id date currency]
       )

@@ -24,19 +24,19 @@ class IbkrAccount::HoldingsProcessorTest < ActiveSupport::TestCase
     @report_date = Date.new(2026, 5, 8)
   end
 
-  test "inserts the broker snapshot price when no price row exists" do
+  test "inserts the broker snapshot price for Date.current when no price row exists" do
     assert_difference -> { Security::Price.where(security: @security).count }, 1 do
       process_holding
     end
 
-    snapshot = Security::Price.find_by!(security: @security, date: @report_date, currency: "USD")
+    snapshot = Security::Price.find_by!(security: @security, date: Date.current, currency: "USD")
     assert_equal BigDecimal("150.00"), snapshot.price
   end
 
   test "does not overwrite an existing price for the same security date and currency" do
     existing = Security::Price.create!(
       security: @security,
-      date: @report_date,
+      date: Date.current,
       currency: "USD",
       price: BigDecimal("149.25")
     )
@@ -60,7 +60,7 @@ class IbkrAccount::HoldingsProcessorTest < ActiveSupport::TestCase
       process_holding
     end
 
-    snapshot = Security::Price.find_by!(security: @security, date: @report_date, currency: "USD")
+    snapshot = Security::Price.find_by!(security: @security, date: Date.current, currency: "USD")
     assert_equal BigDecimal("150.00"), snapshot.price
     assert_equal BigDecimal("140.00"), existing.reload.price
   end
@@ -79,7 +79,7 @@ class IbkrAccount::HoldingsProcessorTest < ActiveSupport::TestCase
 
     security = Security.find_by!(ticker: ticker)
     holding = @account.holdings.find_by!(security: security, date: @report_date, currency: "USD")
-    snapshot = Security::Price.find_by!(security: security, date: @report_date, currency: "USD")
+    snapshot = Security::Price.find_by!(security: security, date: Date.current, currency: "USD")
 
     assert_equal BigDecimal("120"), holding.qty
     assert_equal BigDecimal("96.722"), holding.price
