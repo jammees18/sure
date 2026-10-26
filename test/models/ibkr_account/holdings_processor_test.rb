@@ -20,7 +20,7 @@ class IbkrAccount::HoldingsProcessorTest < ActiveSupport::TestCase
       currency: "CHF"
     )
     @ibkr_account.ensure_account_provider!(@account)
-    @security = securities(:aapl)
+    @security = Security.create!(ticker: "KOKOTST", name: "Koko Test Co", currency: "USD")
     @report_date = Date.new(2026, 5, 8)
   end
 
@@ -96,7 +96,7 @@ class IbkrAccount::HoldingsProcessorTest < ActiveSupport::TestCase
       {
         "asset_category" => "STK",
         "conid" => "265598",
-        "security_id" => "US0378331005",
+        "security_id" => "USKOKOTST0001",
         "security_id_type" => "ISIN",
         "symbol" => @security.ticker,
         "position" => "10",
