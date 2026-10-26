@@ -55,7 +55,7 @@ class IbkrAccount::HoldingsProcessor
       currency = extract_currency(sample, fallback: @ibkr_account.currency)
       external_id = [ "ibkr", @ibkr_account.ibkr_account_id, sample[:conid], report_date, currency ].join("_")
 
-      import_adapter.import_holding(
+      holding = import_adapter.import_holding(
         security: security,
         quantity: quantity,
         amount: amount,
@@ -67,6 +67,16 @@ class IbkrAccount::HoldingsProcessor
         source: "ibkr",
         account_provider_id: @ibkr_account.account_provider&.id,
         delete_future_holdings: false
+      )
+
+      # Provider prices win; the broker snapshot only fills an empty slot.
+      # Date.current (not holding.date): Flex reportDate lags 1-3 days per
+      # position group, but Security#current_price only looks up Date.current.
+      now = Time.current
+      Security::Price.insert_all(
+        [ { security_id: holding.security_id, date: Date.current, price: holding.price,
+            currency: holding.currency, created_at: now, updated_at: now } ],
+        unique_by: %i[security_id date currency]
       )
     end
 
