@@ -20,7 +20,7 @@ class IbkrAccount::HoldingsProcessorTest < ActiveSupport::TestCase
       currency: "CHF"
     )
     @ibkr_account.ensure_account_provider!(@account)
-    @security = Security.create!(ticker: "KOKOTST", name: "Koko Test Co", currency: "USD")
+    @security = Security.create!(ticker: "KOKOTST", name: "Koko Test Co")
     @report_date = Date.new(2026, 5, 8)
   end
 
